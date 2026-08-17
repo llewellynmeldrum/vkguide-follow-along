@@ -1,0 +1,135 @@
+# CMake Wrapper Makefile
+# --------------------------------------------------
+all: run-asan
+
+TOOLCHAIN 		:= $(CURDIR)/cmake/llvm-toolchain.cmake
+BUILD_DIR      := build
+BUILD_CFAST     := build-cfast
+BUILD_FAST     := build-fast
+BUILD_ASAN     := build-asan
+BUILD_TSAN     := build-tsan
+BUILD_AUSAN    := build-ausan
+
+ASAN_OPTS := detect_leaks=0:color=always:abort_on_error=1:halt_on_error=1
+UBSAN_OPTS := color=always:print_stacktrace=1:halt_on_error=1
+
+GENERATOR      := Ninja
+CXX            := clang-22
+CC            := clang-22
+APP            := sdltest
+
+JOBS ?= $(shell sysctl -n hw.logicalcpu 2>/dev/null || nproc)
+BUILD_FLAGS := -j $(JOBS)
+
+CMAKE_COMMON := -G "$(GENERATOR)" \
+	-DCMAKE_TOOLCHAIN_FILE="$(TOOLCHAIN)" \
+  	-DCMAKE_OSX_ARCHITECTURES=arm64 \
+	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+.PHONY: help cfast configure build run clean clean-all rebuild \
+        fast run-fast \
+        debug run-debug \
+        asan run-asan \
+        tsan run-tsan \
+        ausan run-ausan \
+        compile-commands
+
+export OPT_LEVEL
+configure: OPT_LEVEL=2
+configure:
+	cmake -S . -B $(BUILD_DIR) $(CMAKE_COMMON) \
+		-DENABLE_CPPTRACE=ON\
+		-DMC_O2=ON \
+		-DCMAKE_BUILD_TYPE=Debug 
+
+configure-debug:
+	cmake -S . -B $(BUILD_DIR) $(CMAKE_COMMON) \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DMC_O0=ON
+
+build: OPT_LEVEL=2
+build: configure
+	cmake --build $(BUILD_DIR) $(BUILD_FLAGS)
+
+run: OPT_LEVEL=2
+run: build
+	cmake --build $(BUILD_DIR) $(BUILD_FLAGS) --target run\
+
+debug: configure-debug
+	cmake --build $(BUILD_DIR) $(BUILD_FLAGS) 
+
+run-debug: debug
+	cmake --build $(BUILD_DIR) $(BUILD_FLAGS) --target debug
+
+# --------------------------------------------------
+
+# c(ompile) fast
+cfast:
+	cmake -S . -B $(BUILD_CFAST) $(CMAKE_COMMON) \
+		-DCMAKE_BUILD_TYPE=Debug\
+		-DENABLE_CPPTRACE=OFF\
+		-DMC_O2=ON
+
+	cmake --build $(BUILD_CFAST) $(BUILD_FLAGS) --target run
+
+fast:
+	cmake -S . -B $(BUILD_FAST) $(CMAKE_COMMON) \
+		-DENABLE_CPPTRACE=OFF\
+		-DCMAKE_BUILD_TYPE=Relase\
+		-DMC_O3=ON
+
+	cmake --build $(BUILD_FAST) $(BUILD_FLAGS)
+
+run-fast: OPT_LEVEL=3
+run-fast: fast
+	cmake --build $(BUILD_FAST) $(BUILD_FLAGS) --target run
+
+# --------------------------------------------------
+# Sanitizers
+
+asan:
+	cmake -S . -B $(BUILD_ASAN) $(CMAKE_COMMON) \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DMC_ENABLE_ASAN=ON
+	cmake --build $(BUILD_ASAN) $(BUILD_FLAGS)
+
+
+
+tsan:
+	cmake -S . -B $(BUILD_TSAN) $(CMAKE_COMMON) \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DMC_ENABLE_TSAN=ON
+	cmake --build $(BUILD_TSAN) $(BUILD_FLAGS)
+
+run-tsan: tsan
+	cmake --build $(BUILD_TSAN) $(BUILD_FLAGS) --target run
+
+ausan:
+	cmake -S . -B $(BUILD_AUSAN) $(CMAKE_COMMON) \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DMC_ENABLE_ASAN=ON \
+		-DMC_ENABLE_UBSAN=ON
+	cmake --build $(BUILD_AUSAN) $(BUILD_FLAGS)
+
+run-asan: asan
+	ASAN_OPTIONS="$(ASAN_OPTS)" cmake --build $(BUILD_ASAN) $(BUILD_FLAGS) --target run
+
+run-ausan: ausan
+	ASAN_OPTIONS="$(ASAN_OPTS)" UBSAN_OPTIONS="$(UBSAN_OPTS)" cmake --build $(BUILD_AUSAN) $(BUILD_FLAGS) --target run
+
+# --------------------------------------------------
+# Utilities
+#
+
+db: configure
+	cp $(BUILD_DIR)/compile_commands.json ./compile_commands.json
+
+clean:
+	find $(BUILD_DIR)/CMakeFiles/sdltest.dir/src -name '*.o' -delete 2>/dev/null || true
+	find $(BUILD_DIR)/CMakeFiles/sdltest.dir/src -name '*.o.d' -delete 2>/dev/null || true
+	rm -f bin/$(APP)
+
+clean-all:
+	rm -rf $(BUILD_DIR) $(BUILD_CFAST) $(BUILD_FAST) $(BUILD_ASAN) $(BUILD_TSAN) $(BUILD_AUSAN) bin
+
+rebuild: clean build

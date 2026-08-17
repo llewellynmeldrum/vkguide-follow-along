@@ -1,0 +1,16 @@
+*.o
+*.d
+.*
+*.xcf
+compile_commands.json*
+todo.md
+bin/*
+!.gitignore
+
+imgui.ini
+build*/
+
+docs/*
+
+rename_header
+resources/fonts

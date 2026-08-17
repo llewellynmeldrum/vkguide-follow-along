@@ -1,0 +1,11 @@
+## Misc artifacts
+.DS_Store
+.claude
+.vscode
+
+
+docs/
+examples/
+backends/
+misc/
+
