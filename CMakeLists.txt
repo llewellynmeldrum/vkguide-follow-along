@@ -46,7 +46,7 @@ target_include_directories(vulkan_test0 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/external/cpptrace"
     "${CMAKE_CURRENT_SOURCE_DIR}/external/libassert"
     "${CMAKE_CURRENT_SOURCE_DIR}/external/magic_enum"
-    "${CMAKE_CURRENT_SOURCE_DIR}/external/VulkanMemoryAllocator/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/reflect-cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/external/VulkanMemoryAllocator/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/external/vk_bootstrap/src"
 )
@@ -70,6 +70,7 @@ set(MAGIC_ENUM_OPT_INSTALL     OFF)
 include(FetchContent)
 FetchContent_Declare(cpptrace   SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/cpptrace)
 FetchContent_Declare(magic_enum SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/magic_enum)
+FetchContent_Declare(reflect_cpp SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/reflect-cpp)
 #FetchContent_Declare(libassert  SOURCE_DIR ${CMAKE_SOURCE_DIR}/external/libassert)
 
 FetchContent_MakeAvailable(cpptrace)
@@ -86,7 +87,7 @@ target_include_directories( vulkan_test0 SYSTEM PRIVATE  ${CMAKE_SOURCE_DIR}/ext
 
 # -- CPPTRACE (stack traces)
 if (ENABLE_CPPTRACE)
-target_link_libraries(vulkan_test0 PRIVATE cpptrace::cpptrace)
+    target_link_libraries(vulkan_test0 PRIVATE cpptrace::cpptrace)
 endif()
 
 
@@ -164,7 +165,7 @@ add_custom_target(debug
 
 if(APPLE)
     if(ENABLE_CPPTRACE)
-    add_custom_command(TARGET vulkan_test0 POST_BUILD
+        add_custom_command(TARGET vulkan_test0 POST_BUILD
     COMMAND dsymutil $<TARGET_FILE:vulkan_test0>
     COMMENT "Generating .dSYM for stack traces for cpptrace/libassert")
     endif()
