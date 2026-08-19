@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <numeric>
 #include <string_view>
-#include "vk_types.hpp"
 #include "libassert/assert.hpp"
 // NOTE: I know this is considered bad practice, and I probably wont do it for the ""s operators, but i think ""sv is unique enough that it shouldnt matter.
 // I just really dislike c strings.
