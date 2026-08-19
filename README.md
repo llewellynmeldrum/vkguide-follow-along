@@ -7,6 +7,9 @@ In order to update my minecraft clone to vulkan, im going to take some time to l
 - [ ] Do some basic 2d rendering
 - [ ] Remake a simple board game (Petteia probably)
 - [ ] do some basic 3d rendering
+- [ ] ...
+- [ ] hw accelerated raytracing ????
+
 
 
 ## vkguide chapter progress:
