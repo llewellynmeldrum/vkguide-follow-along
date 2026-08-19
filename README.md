@@ -1,9 +1,9 @@
 # learning vulkan
 
-In order to update my minecraft clone to vulkan, im going to take some time to learn it separately and make some test apps first. I plan to follow along with vkguide.dev until i understand the basics, and then:
+In order to update my minecraft clone to vulkan, im going to take some time to learn it separately and make some test apps first. My plan:
 
 
-- [ ] Complete however many chapters of vkguide.dev feels necessary
+- [ ] Complete however many chapters of [vkguide.dev](https://vkguide.dev/) feels necessary
 - [ ] Do some basic 2d rendering
 - [ ] Remake a simple board game (Petteia probably)
 - [ ] do some basic 3d rendering
