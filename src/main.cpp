@@ -515,8 +515,19 @@ void VkEngine::run() {
 }
 void VkEngine::cleanup() {
     if (is_initialized()) {
+        m_vkDevice.waitIdle();
+
+        m_Swapchain = Swapchain{};
+        for (auto& frame: m_inflightFrames){
+            frame = FrameData{};
+        }
+        m_vkQueue.clear();
+        m_vkDevice.clear();
+        m_vkPhysicalDevice.clear();
+        m_vkSurface.clear();
         // this cant be done here, shouldnt it happen after destruction of raii stuff?
         SDL_DestroyWindow(m_window);
+        m_window = nullptr;
     }
     m_loadedEngine = nullptr;
 }
