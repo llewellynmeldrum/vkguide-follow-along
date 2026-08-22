@@ -1,5 +1,5 @@
 #pragma once 
-#include "Types.hpp"
+#include "types.hpp"
 namespace timer{
     using impl_clock = std::chrono::steady_clock;
     using duration = impl_clock::duration;

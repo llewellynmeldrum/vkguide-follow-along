@@ -1,6 +1,6 @@
 #pragma once 
 #include "style.hpp"
-#include "Timer.hpp"
+#include "timer.hpp"
 #include <cpptrace/basic.hpp>
 #include <cpptrace/utils.hpp>
 #include <cstdlib>

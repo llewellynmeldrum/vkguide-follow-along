@@ -1,82 +1,38 @@
-
+#include <vulkan/vulkan.hpp>
+#include "vk_types.hpp"
+#include "range/v3/view/enumerate.hpp"
+// stdlib
 #include <format>
 #include <print>
 #include <thread>
 #include <type_traits>
 
-#include "SDL3/SDL_video.h"
-#include "Types.hpp"
-#include "VkBootstrap.h"
-#include "logger.hpp"
-#include "shared.hpp"
-#include "vk_images.hpp"
-#include "vk_types.hpp"
-#include "vkinit.hpp"
+// Libraries
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <cpptrace/utils.hpp>
-#include <vulkan/vulkan_core.h>
+#include <SDL3/SDL_video.h>
+#include <VkBootstrap.h>
 
-#include "Timer.hpp"
+// Project headers
+#include "types.hpp"
+#include "vk_images.hpp"
+#include "vk_swapchain.hpp"
+#include "logger.hpp"
+#include "shared.hpp"
+#include "vkinit.hpp"
+#include "timer.hpp"
+#include "vulkan/vulkan.hpp"
+//#include "vulkan/vulkan.hpp"
 
-const char* APP_NAME = "Test Window";
 
-//*******************************************************************************************
-// swapchain.hpp
-struct Swapchain {
-    VkSwapchainKHR descriptor;
-    VkFormat imageFormat;
-    std::vector<VkImage> images;
-    std::vector<VkImageView> imageViews;
-    VkExtent2D extent;
-};
-struct SwapchainSettings {
-    VkPhysicalDevice physical_device{};
-    VkDevice device{};
-    VkSurfaceKHR surface{};
-    VkExtent2D extents{};
-    VkFormat format{VK_FORMAT_B8G8R8A8_UNORM};
-    VkColorSpaceKHR colorSpace{VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-    VkPresentModeKHR present_mode{VK_PRESENT_MODE_FIFO_KHR};
-    VkImageUsageFlagBits image_usage_flags{VK_IMAGE_USAGE_TRANSFER_DST_BIT};
-};
-
-constexpr inline auto make_swapchain(SwapchainSettings const& s) {
-    auto vkb_swapchain =
-        vkb::SwapchainBuilder{s.physical_device, s.device, s.surface}
-            .set_desired_format({
-                .format = s.format,
-                .colorSpace = s.colorSpace,
-            })
-            .set_desired_present_mode(s.present_mode)
-            .set_desired_extent(s.extents.width, s.extents.height)
-            .add_image_usage_flags(s.image_usage_flags)
-            .build()
-            .value();
-    if (!vkb_swapchain)
-        LOG_FATAL("Failed to build swapchain.");
-
-    auto sw = Swapchain{
-        .descriptor = vkb_swapchain.swapchain,
-        .imageFormat = vkb_swapchain.image_format,
-        .images = vkb_swapchain.get_images().value(),
-        .imageViews = vkb_swapchain.get_image_views().value(),
-        .extent = vkb_swapchain.extent,
-    };
-    std::println("{}", static_cast<void const*>(sw.descriptor));
-    std::println("{}", static_cast<void const*>(sw.images.data()));
-    ASSERT(sw.images.size() > 0);
-    return sw;
-}
-//*******************************************************************************************
+char const* APP_NAME = "Test Window";
 
 struct FrameData {
-    VkCommandPool commandPool;
-    VkCommandBuffer commandBuffer;
-    // sync:
-    VkFence fence;
-    VkSemaphore swapchainSemaphore;
-    VkSemaphore renderSemaphore;
+    vk::raii::CommandPool commandPool{nullptr};
+    vk::raii::CommandBuffer commandBuffer{nullptr};
+    vk::raii::Fence fence{nullptr};
+    vk::raii::Semaphore swapchainSemaphore{nullptr};
 };
 
 FWD_DECL_STRUCT(SDL_Window);
@@ -86,28 +42,30 @@ struct VkEngine {
     static constexpr u32 N_FSYNC = 2;
     VkEngine() { init(); }
     ~VkEngine() { cleanup(); }
-
-    VkInstance m_vkInstance{};
-    VkExtent2D m_windowExtent{800, 600};
-    VkDebugUtilsMessengerEXT m_vkDebugMessenger{};
-    VkPhysicalDevice m_vkPhysicalDevice{};
-    VkDevice m_vkDevice{};
-    VkSurfaceKHR m_vkSurface{};
-
-    Swapchain m_Swapchain{};
-
     VkEngine* m_loadedEngine{};
+
     size_t m_frameCount{};
     bool m_shouldStopRendering{};
     SDL_Window* m_window{};
+    static constexpr vk::Extent2D m_windowExtent{800, 600};
+    static constexpr bool m_useValidationLayers{true};
+
+    vk::raii::Context m_vkContext{};
+    vk::raii::Instance m_vkInstance{nullptr};
+    vk::raii::DebugUtilsMessengerEXT m_vkDebugMessenger{nullptr};
+    vk::raii::SurfaceKHR m_vkSurface{nullptr};
+    vk::raii::PhysicalDevice m_vkPhysicalDevice{nullptr};
+    vk::raii::Device m_vkDevice{nullptr};
+    vk::raii::Queue m_vkQueue{nullptr};
+    u32 m_vkQueueFamily{};
+
+
+    Swapchain m_Swapchain{};
 
     array<FrameData, N_FSYNC> m_inflightFrames{};
-    VkQueue m_vkQueue{};
-    u32 m_vkQueueFamily{};
 
     FrameData& get_current_frame();
 
-    constexpr static bool m_useValidationLayers{true};
 
     VkEngine& get();
 
@@ -138,112 +96,282 @@ void VkEngine::init_window() {
         LOG_EXIT(1);
     }
 }
+VKAPI_ATTR vk::Bool32 VKAPI_CALL vk_debug_callback(
+    vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
+    vk::DebugUtilsMessageTypeFlagsEXT types,
+    vk::DebugUtilsMessengerCallbackDataEXT const* data,
+    void* _
+) {
+    using Sev = vk::DebugUtilsMessageSeverityFlagBitsEXT;
+    auto const kind = vk::to_string(types);
+    if (severity >= Sev::eError) {
+        LOG_ERROR("[vulkan {}] {}", kind, data->pMessage);
+    } else if (severity >= Sev::eWarning) {
+        LOG_WARN("[vulkan {}] {}", kind, data->pMessage);
+    } else {
+        LOG_INFO("[vulkan {}] {}", kind, data->pMessage);
+    }
+    ASSERT(false);
+    return vk::False;
+}
 
-void VkEngine::init_vulkan() {
+bool supports_extension(std::span<vk::ExtensionProperties const> haystack, std::string_view needle) {
+    return std::ranges::any_of(
+        haystack, 
+        [needle](auto const& ext) {
+            return std::string_view{ext.extensionName} == needle;
+        }
+    );
+}
+template<typename Pred>
+auto get_pd_queue_family(vk::raii::PhysicalDevice physical_device, Pred&& pred) -> std::optional<std::size_t>{
+    auto families = physical_device.getQueueFamilyProperties();
+    for (auto const& [idx, family] : ranges::views::enumerate(families)){
+        if (!(family.queueFlags & vk::QueueFlagBits::eGraphics)){
+            continue;
+        }
+        if (std::invoke(std::forward<Pred>(pred),idx)){
+            return idx;
+        }
+    }
+    return std::nullopt;
+}
+constexpr auto pd_has_required_features(vk::raii::PhysicalDevice const& pd) {
 
-    // 1. query SDL for the extensions of this instance
+    auto const features = pd.getFeatures2<
+        vk::PhysicalDeviceFeatures2,
+        vk::PhysicalDeviceVulkan12Features,
+        vk::PhysicalDeviceVulkan13Features
+    >();
+
+    auto const& f12 = features.get<vk::PhysicalDeviceVulkan12Features>();
+    auto const& f13 = features.get<vk::PhysicalDeviceVulkan13Features>();
+
+    bool f12_compliant = 
+        f12.descriptorIndexing 
+        && f12.bufferDeviceAddress;
+
+    bool f13_compliant = 
+        f13.synchronization2 
+        && f13.dynamicRendering;
+
+    return f12_compliant && f13_compliant;
+};
+void VkEngine::init_vulkan() try {
+    static constexpr auto API_VER = vk::ApiVersion13;
+    constexpr auto EXT_MOLTENVK_FIX = "VK_KHR_portability_subset";
+    constexpr auto VALIDATION_LAYER = "VK_LAYER_KHRONOS_validation";
+    // sdl requires some extensions for its windowing stuff
+    
     u32 ext_count{};
-    auto extensions = SDL_Vulkan_GetInstanceExtensions(&ext_count);
+    auto const* sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&ext_count);
+    if (!sdl_extensions){
+        LOG_FATAL("Failed to query extensions from SDL. SDL_Error:{}",SDL_GetError());
+    }
+    auto instanceExtensions = std::vector<char const*>(sdl_extensions, sdl_extensions+ext_count);
+    auto appLayers = std::vector<char const*>{};
+    auto instanceFlags = vk::InstanceCreateFlags{};
 
-    // 2. Create the instance+debug messenger with a vkb::InstanceBuilder
-    auto vkb_builder_ret = vkb::InstanceBuilder{}
-                               .set_app_name(APP_NAME)
-                               .request_validation_layers(m_useValidationLayers)
-                               .enable_extensions(ext_count, extensions)
-                               .require_api_version(1, 3, 0)
-                               .build();
-    if (!vkb_builder_ret)
-        LOG_FATAL("Failed to build vulkan instance.");
-    auto vkb_instance = vkb_builder_ret.value();
 
-    m_vkInstance = vkb_instance.instance;
-    m_vkDebugMessenger = vkb_instance.debug_messenger;
+    struct InstanceExtension{
+        const char* name;
+        vk::InstanceCreateFlagBits flag;
+    };
+    static constexpr InstanceExtension portabilityKHR{
+        .name = vk::KHRPortabilityEnumerationExtensionName,
+        .flag = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+    };
 
-    // 3. Create the VkSurfaceKHR to render to
-    assert(m_window);
-    if (!SDL_Vulkan_CreateSurface(m_window, m_vkInstance, nullptr,
-                                  &m_vkSurface)) {
-        LOG_ERROR("Failure in {}(): {}", "SDL_Vulkan_CreateSurface",
-                  SDL_GetError());
-        LOG_EXIT(1);
+    auto const inst_supported_extensions = m_vkContext.enumerateInstanceExtensionProperties();
+    // this is required to enable moltenVK support, as it is a non conformant driver
+    if (supports_extension(inst_supported_extensions, portabilityKHR.name)){
+        instanceExtensions.push_back(portabilityKHR.name);
+        instanceFlags |= vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR;
     }
 
-    // 4. Select a physical device with certain capabilities
-    auto vkb_physical_device_res =
-        vkb::PhysicalDeviceSelector{vkb_instance}
-            .set_minimum_version(1, 3)
-            .set_required_features_12({
-                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-                .descriptorIndexing = true,
-                .bufferDeviceAddress = true,
-            })
-            .set_required_features_13({
-                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-                .synchronization2 = true,
-                .dynamicRendering = true,
-            })
-            .set_surface(m_vkSurface)
-            .select();
-    if (!vkb_physical_device_res)
-        LOG_FATAL("Failed to select physical device.");
-    auto vkb_physical_device = vkb_physical_device_res.value();
-    m_vkPhysicalDevice = vkb_physical_device.physical_device;
+    if (m_useValidationLayers){
+        appLayers.push_back(VALIDATION_LAYER);
+        instanceExtensions.push_back(vk::EXTDebugUtilsExtensionName);
+    }
 
-    // 5. Create the logical device from the physical one
-    auto vkb_device_res = vkb::DeviceBuilder{vkb_physical_device}.build();
-    if (!vkb_device_res)
-        LOG_FATAL("Failed to select physical device.");
-    auto vkb_device = vkb_device_res.value();
+ 
+    auto appInfo = vk::ApplicationInfo{
+        .pApplicationName = APP_NAME,
+        .applicationVersion = vk::makeApiVersion(0, 0, 1, 0),
+        .pEngineName = "No Engine",
+        .engineVersion = vk::makeApiVersion(0, 0, 1, 0),
+        .apiVersion = API_VER,
+    };
 
-    m_vkDevice = vkb_device.device;
+    using Severity = vk::DebugUtilsMessageSeverityFlagBitsEXT;
+    using Type = vk::DebugUtilsMessageTypeFlagBitsEXT;
+    auto const instanceDebugInfo = vk::DebugUtilsMessengerCreateInfoEXT{
+        .messageSeverity = Severity::eWarning | Severity::eError,
+        .messageType = Type::eGeneral | Type::eValidation | Type::ePerformance,
+        .pfnUserCallback = vk_debug_callback,
+    };
 
-    m_vkQueue = vkb_device.get_queue(vkb::QueueType::graphics).value();
-    m_vkQueueFamily =
-        vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+    m_vkInstance = vk::raii::Instance{
+        m_vkContext,
+        vk::InstanceCreateInfo{
+            // without this pnext, vulkan cannot report errors to the debug extension during instance creation
+            .pNext = m_useValidationLayers ? &instanceDebugInfo : nullptr,
+            .flags = instanceFlags,
+            .pApplicationInfo = &appInfo,
+
+            .enabledLayerCount = static_cast<u32>(appLayers.size()),
+            .ppEnabledLayerNames = appLayers.data(),
+
+            .enabledExtensionCount = static_cast<u32>(instanceExtensions.size()),
+            .ppEnabledExtensionNames = instanceExtensions.data(),
+
+        },
+    };
+
+    if (m_useValidationLayers){
+        m_vkDebugMessenger = vk::raii::DebugUtilsMessengerEXT{m_vkInstance, instanceDebugInfo};
+    }
+    ASSERT(m_window);
+
+    // Have SDL create the surface given our instance we just setup 
+    auto raw_surface = VkSurfaceKHR{};
+    if (!SDL_Vulkan_CreateSurface(m_window, get_c_handle(m_vkInstance), nullptr,
+                                  &raw_surface)) {
+        LOG_FATAL("Failure in {}(): {}", "SDL_Vulkan_CreateSurface", SDL_GetError());
+    }
+    m_vkSurface = vk::raii::SurfaceKHR{m_vkInstance, raw_surface};
+
+    // NOTE: Instance extensions modify global behaviour BEFORE a device is selected,
+    // whereas DEVICE extensions modify the behaviour of a specific vk::Device.
+    // Configure Device extensions
+    auto device_extensions = std::vector<char const*>{};
+
+    // iterate over all physical devices listed by driver
+    for (auto const& physical_device : m_vkInstance.enumeratePhysicalDevices()){
+        // skip if device doesnt support expected api version
+        auto device_api_ver = physical_device.getProperties().apiVersion;
+        if (device_api_ver < API_VER) continue;
+
+        // skip if device doesnt support khr swapchain
+        auto const supported_extensions = physical_device.enumerateDeviceExtensionProperties();
+        if (!supports_extension(supported_extensions,vk::KHRSwapchainExtensionName)){
+            continue;
+        }
+
+        auto family = get_pd_queue_family(
+            physical_device, 
+            [physical_device, this](u32 idx){
+                return physical_device.getSurfaceSupportKHR(idx,m_vkSurface) == vk::True;
+            }
+        );
+        if (!family) continue; // no matching queue family on the device
+        
+        if (!pd_has_required_features(physical_device)) continue;
+
+        device_extensions.push_back(vk::KHRSwapchainExtensionName); 
+
+        if (supports_extension(supported_extensions,EXT_MOLTENVK_FIX)){
+            device_extensions.push_back(EXT_MOLTENVK_FIX);
+        }
+        m_vkPhysicalDevice = std::move(physical_device);
+        m_vkQueueFamily = *family;
+        break;
+    }
+    if (!*m_vkPhysicalDevice){
+        LOG_FATAL("Unable to select a physical device! Driver listed {}, none matched",//
+                  m_vkInstance.enumeratePhysicalDevices().size());
+    }else{
+        LOG_INFO("SELECTED GPU: {}",std::string_view{m_vkPhysicalDevice.getProperties().deviceName});
+    }
+
+    auto queue_prio = 1.0f;
+    auto queue_info = vk::DeviceQueueCreateInfo{
+        .queueFamilyIndex = m_vkQueueFamily,
+        .queueCount = 1,
+        .pQueuePriorities = &queue_prio,
+    };
+
+    auto const required_features_12 = vk::PhysicalDeviceVulkan12Features{
+        .descriptorIndexing = vk::True,
+        .bufferDeviceAddress = vk::True,
+    };
+    auto const required_features_13 = vk::PhysicalDeviceVulkan13Features{
+        .synchronization2 = vk::True,
+        .dynamicRendering = vk::True,
+    };
+
+    auto enabled_features = vk::StructureChain{
+        vk::PhysicalDeviceFeatures2{},
+        required_features_12,
+        required_features_13,
+    };
+    m_vkDevice = vk::raii::Device{
+        m_vkPhysicalDevice,
+        vk::DeviceCreateInfo{
+            .pNext = &enabled_features.get<vk::PhysicalDeviceFeatures2>(),
+            .queueCreateInfoCount = 1,
+            .pQueueCreateInfos = &queue_info,
+            .enabledExtensionCount = static_cast<u32>(device_extensions.size()),
+            .ppEnabledExtensionNames = device_extensions.data(),
+        },
+    };
+    m_vkQueue = m_vkDevice.getQueue(m_vkQueueFamily, 0);
+} catch(vk::SystemError const& e){
+    LOG_FATAL("Failed to initialize vulkan: {}", e.what());
 }
+
 
 void VkEngine::init_swapchain() {
-    m_Swapchain = make_swapchain(SwapchainSettings{
-        .physical_device = m_vkPhysicalDevice,
-        .device = m_vkDevice,
-        .surface = m_vkSurface,
-        .extents = m_windowExtent,
-    });
-}
-
-void VkEngine::cleanup_swapchain() {
-    for (auto image_view : m_Swapchain.imageViews) {
-        vkDestroyImageView(m_vkDevice, image_view, nullptr);
-    }
-    vkDestroySwapchainKHR(m_vkDevice, m_Swapchain.descriptor, nullptr);
+    m_Swapchain = make_swapchain(
+        SwapchainSettings{
+            .physical_device = m_vkPhysicalDevice,
+            .device = m_vkDevice,
+            .surface = m_vkSurface,
+            .extents = m_windowExtent,
+        }
+    );
 }
 
 void VkEngine::init_commands() {
-    auto cmdPoolInfo = vk_init::command_pool_create_info(
-        m_vkQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    for (auto& frame : m_inflightFrames) {
-        vk_check(vkCreateCommandPool(m_vkDevice, &cmdPoolInfo, nullptr,
-                                     &frame.commandPool));
-
-        auto allocInfo =
-            vk_init::command_buffer_alloc_info(frame.commandPool, 1);
-
-        vk_check(vkAllocateCommandBuffers(m_vkDevice, &allocInfo,
-                                          &frame.commandBuffer));
+    for (auto& frame : m_inflightFrames){
+        frame.commandPool = vk::raii::CommandPool{
+            m_vkDevice,
+            vk::CommandPoolCreateInfo{
+                // without this flag, we would not be able to individually reset command buffers,
+                // but rather only the whole pool
+                .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+                .queueFamilyIndex = m_vkQueueFamily,
+            },
+        };
+        
+        auto buffers = m_vkDevice.allocateCommandBuffers(
+            vk::CommandBufferAllocateInfo{
+                .commandPool = *frame.commandPool,
+                .level = vk::CommandBufferLevel::ePrimary,
+                .commandBufferCount = 1,
+            }
+        );
+        ASSERT(buffers.size() == 1);
+        frame.commandBuffer = std::move(buffers.at(0));
     }
+
+
 }
 
 void VkEngine::init_sync_structures() {
-    auto fenceCreateInfo =
-        vk_init::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
-    auto semaphoreCreateInfo = vk_init::semaphore_create_info();
     for (auto& frame : m_inflightFrames) {
-        vk_check(
-            vkCreateFence(m_vkDevice, &fenceCreateInfo, nullptr, &frame.fence));
-        vk_check(vkCreateSemaphore(m_vkDevice, &semaphoreCreateInfo, nullptr,
-                                   &frame.renderSemaphore));
-        vk_check(vkCreateSemaphore(m_vkDevice, &semaphoreCreateInfo, nullptr,
-                                   &frame.swapchainSemaphore));
+        // Fences are cpu<->gpu. 
+        frame.fence = vk::raii::Fence{
+            m_vkDevice,
+            vk::FenceCreateInfo{
+                .flags = vk::FenceCreateFlagBits::eSignaled,
+            },
+        };
+
+        frame.swapchainSemaphore = vk::raii::Semaphore{
+            m_vkDevice,
+            vk::SemaphoreCreateInfo{}
+        };
     }
 }
 
@@ -263,72 +391,100 @@ u64 stons(T sec) {
     return static_cast<u64>(sec * 1'000'000'000);
 }
 void VkEngine::draw() {
-    auto& curFrame = get_current_frame();
-    vk_check(vkWaitForFences(m_vkDevice, 1, &curFrame.fence, true, stons(1)));
-    vk_check(vkResetFences(m_vkDevice, 1, &curFrame.fence));
+    auto& frame = get_current_frame();
+    auto fenceWaitRV = m_vkDevice.waitForFences(*frame.fence, vk::True, stons(1));
+    if (fenceWaitRV != vk::Result::eSuccess){
+        LOG_FATAL("Failed to wait for fence");
+    }
+    u32 imageIndex{};
+    try{
+        auto [res, idx] = m_Swapchain.descriptor.acquireNextImage(stons(1),*frame.swapchainSemaphore);
+        imageIndex = idx;
+        if (res == vk::Result::eSuboptimalKHR){
+            LOG_WARN("Suboptimal swapchain acquire (wtv the fuck that means)");
+        }
+    } catch(vk::OutOfDateKHRError const&){
+        // recreate swapchain
+        PANIC("Unimplemented");
+    }
+    m_vkDevice.resetFences(*frame.fence);
 
-    // request image from the swapchain
-    // If the swapchain has no image ready, it will just block the thread
-    // for `timeout`
-    u32 swapchainImageIdx{};
-    vk_check(vkAcquireNextImageKHR(m_vkDevice, m_Swapchain.descriptor, stons(1),
-                                   curFrame.swapchainSemaphore, VK_NULL_HANDLE,
-                                   &swapchainImageIdx));
-    auto cmd_buf = curFrame.commandBuffer;
-    vk_check(vkResetCommandBuffer(cmd_buf, 0));
+    auto & cmdBuf = frame.commandBuffer;
 
-    auto commandBufferBeginInfo = vk_init::command_buffer_begin_info(
-        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    cmdBuf.reset();
 
-    vk_check(vkBeginCommandBuffer(cmd_buf, &commandBufferBeginInfo));
+    cmdBuf.begin(
+        vk::CommandBufferBeginInfo{
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        }
+    );
+    auto const swapchainImage = m_Swapchain.images.at(imageIndex);
 
-    auto swap_img = m_Swapchain.images.at(swapchainImageIdx);
-    vk_util::transition_image(cmd_buf, swap_img, VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_GENERAL);
+    vk_util::transition_image(cmdBuf, swapchainImage, 
+                              vk::ImageLayout::eUndefined,
+                              vk::ImageLayout::eGeneral);
 
-    auto clearColor = VkClearColorValue{{
+    auto const clearColor = vk::ClearColorValue{.float32 = {{
         std::abs(std::sin(m_frameCount / 120.0f)),
         0.0f,
         std::abs(std::sin(m_frameCount / 120.0f)),
-        1.0f,
-    }};
+        1.0f
+        }}
+    };
 
-    auto clearRange =
-        vk_init::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+    cmdBuf.clearColorImage(
+            swapchainImage, 
+            vk::ImageLayout::eGeneral,
+            clearColor,
+            vk_util::image_subresource_range(vk::ImageAspectFlagBits::eColor)
+        );
 
-    vkCmdClearColorImage(cmd_buf, swap_img, VK_IMAGE_LAYOUT_GENERAL,
-                         &clearColor, 1, &clearRange);
+    vk_util::transition_image(cmdBuf, swapchainImage, 
+                              vk::ImageLayout::eGeneral,
+                                vk::ImageLayout::ePresentSrcKHR);
+    cmdBuf.end();
 
-    vk_util::transition_image(cmd_buf, swap_img, VK_IMAGE_LAYOUT_GENERAL,
-                              VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    vk_check(vkEndCommandBuffer(cmd_buf));
+    auto const cmdInfo = vk::CommandBufferSubmitInfo{
+        .commandBuffer = *cmdBuf,
+    };
+    auto const waitInfo = vk::SemaphoreSubmitInfo{
+        .semaphore = *frame.swapchainSemaphore,
+        .value = 1,
+        .stageMask = vk::PipelineStageFlagBits2::eAllCommands,
+    };
 
-    auto submit_info = vk_init::command_buffer_submit_info(cmd_buf);
-    auto wait_info = vk_init::semaphore_submit_info(
-        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
-        curFrame.swapchainSemaphore);
-    auto signal_info = vk_init::semaphore_submit_info(
-        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, curFrame.renderSemaphore);
-
-    auto submission =
-        vk_init::submit_info(&submit_info, &signal_info, &wait_info);
-
-    vk_check(vkQueueSubmit2(m_vkQueue, 1, &submission,
-                            curFrame.fence) // SEGFAULT IN HERE
+    auto const signalInfo = vk::SemaphoreSubmitInfo{
+        .semaphore = *m_Swapchain.renderSemaphores[imageIndex],
+        .value = 1,
+        .stageMask = vk::PipelineStageFlagBits2::eAllCommands,
+    };
+    auto submit_info = vk::SubmitInfo2{};
+    submit_info.setCommandBufferInfos(cmdInfo);
+    submit_info.setWaitSemaphoreInfos(waitInfo);
+    submit_info.setSignalSemaphoreInfos(signalInfo);
+    m_vkQueue.submit2(
+        submit_info,
+        *frame.fence
     );
+    try {
+        auto const res = m_vkQueue.presentKHR(
+            vk::PresentInfoKHR{
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &*m_Swapchain.renderSemaphores[imageIndex],
+                .swapchainCount = 1,
+                .pSwapchains = &*m_Swapchain.descriptor,
+                .pImageIndices = &imageIndex,
+            }
+        );
+        if (res == vk::Result::eSuboptimalKHR){
+            // recreate swapchain
+            PANIC("Unimplemented");
+        }
 
-    auto present_info =
-        VkPresentInfoKHR{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-                         .pNext = nullptr,
-
-                         .waitSemaphoreCount = 1,
-                         .pWaitSemaphores = &curFrame.renderSemaphore,
-
-                         .swapchainCount = 1,
-                         .pSwapchains = &m_Swapchain.descriptor,
-
-                         .pImageIndices = &swapchainImageIdx};
-    vk_check(vkQueuePresentKHR(m_vkQueue, &present_info));
+    } catch(vk::OutOfDateKHRError const&){
+        // recreate swapchain
+        PANIC("Unimplemented");
+    }
     m_frameCount++;
 }
 void VkEngine::run() {
@@ -358,22 +514,8 @@ void VkEngine::run() {
     // TODO: implement
 }
 void VkEngine::cleanup() {
-    LOG_INFO("DESTROYING ENGINE ({})", static_cast<void*>(this));
     if (is_initialized()) {
-        vkDeviceWaitIdle(m_vkDevice);
-        for (auto& frame : m_inflightFrames) {
-            vkDestroyCommandPool(m_vkDevice, frame.commandPool, nullptr);
-
-            vkDestroyFence(m_vkDevice, frame.fence, nullptr);
-            vkDestroySemaphore(m_vkDevice, frame.renderSemaphore, nullptr);
-            vkDestroySemaphore(m_vkDevice, frame.swapchainSemaphore, nullptr);
-        }
-
-        cleanup_swapchain();
-        vkDestroySurfaceKHR(m_vkInstance, m_vkSurface, nullptr);
-        vkDestroyDevice(m_vkDevice, nullptr);
-        vkb::destroy_debug_utils_messenger(m_vkInstance, m_vkDebugMessenger);
-        vkDestroyInstance(m_vkInstance, nullptr);
+        // this cant be done here, shouldnt it happen after destruction of raii stuff?
         SDL_DestroyWindow(m_window);
     }
     m_loadedEngine = nullptr;

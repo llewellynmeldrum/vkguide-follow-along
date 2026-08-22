@@ -1,39 +1,45 @@
 #pragma once
 
+#include <array>
+#include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
-#include <span>
-#include <array>
-#include <functional>
-#include <deque>
-
-
-#include <vulkan/vulkan_raii.hpp>
-#include <vulkan/vk_enum_string_helper.h>
-#include <vulkan/vulkan.hpp>
-#include "VkBootstrap.h"
-#include "logger.hpp"
-#include "vk_mem_alloc.h"
-
 #include <format>
 
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vk_enum_string_helper.h>
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+#include <VkBootstrap.h>
+#include <vk_mem_alloc.h>
 
-inline constexpr void vk_check(VkResult err) noexcept{
-    if (err != VK_SUCCESS){
+#include "common_concepts.hpp"
+#include "logger.hpp"
+#include "vk_concepts.hpp"
+
+inline constexpr void vk_check(VkResult err) noexcept {
+    if (err != VK_SUCCESS) {
         LOG_FATAL("VULKAN ERROR: {}", string_VkResult(err));
     }
 }
-inline constexpr void vk_check(vk::Result err) noexcept{
+inline constexpr void vk_check(vk::Result err) noexcept {
     return vk_check(static_cast<VkResult>(err));
 }
-template<typename From>
-inline constexpr auto to_ctype(From&& val) noexcept{
-    using fromType = std::remove_cvref_t<From>(decltype(val));
-    using resType = fromType::CType;
-    return static_cast<resType>(val);
-
+template <typename From> //
+inline constexpr auto get_c_handle(From const& val) noexcept {
+    if constexpr (vkhpp_handle<From>) {
+        using vkhpp_type = From;
+        return static_cast<vkhpp_type::CType>(val);
+    } else if constexpr (vkhpp_raii<From>) {
+        using vkhpp_type = From::CppType;
+        return static_cast<vkhpp_type::CType>(*val);
+    } else {
+        static_assert(false, "T is not a vkhpp type");
+    }
 }
+

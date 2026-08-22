@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <numeric>
 #include <string_view>
+
 #include "libassert/assert.hpp"
 // NOTE: I know this is considered bad practice, and I probably wont do it for the ""s operators, but i think ""sv is unique enough that it shouldnt matter.
 // I just really dislike c strings.
@@ -25,6 +26,11 @@ using Radians = f32;
 const inline f32 F32_MAX = std::numeric_limits<f32>::max();
 const inline f32 F32_MIN = std::numeric_limits<f32>::lowest();
 
+template<typename T>
+constexpr inline T numeric_min = std::numeric_limits<T>::lowest();
+
+template<typename T>
+constexpr inline T numeric_max = std::numeric_limits<T>::max();
 
 constexpr static inline std::size_t N_CARDINAL_DIRECTIONS {4};
 // Parity with glsl

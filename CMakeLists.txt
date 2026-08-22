@@ -51,6 +51,7 @@ target_include_directories(vulkan_test0 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/external/vk_bootstrap/src"
 )
 
+target_compile_definitions(vulkan_test0 PUBLIC VULKAN_HPP_NO_CONSTRUCTORS)
 set_target_properties( vulkan_test0 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin"
 )
@@ -116,7 +117,6 @@ OPTION(MC_FAST_MATH    "ENABLE -FFAST-MATH" OFF)
 OPTION(MC_O1 "ENABLE -O1" OFF)
 OPTION(MC_O2 "ENABLE -O2" OFF)
 OPTION(MC_O3 "ENABLE -O3" OFF)
-
 
 if(MC_O1)
     target_compile_options(vulkan_test0 PRIVATE -O1)
